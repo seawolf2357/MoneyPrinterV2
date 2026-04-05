@@ -2,9 +2,10 @@ gradio>=4.0
 huggingface_hub>=0.20.0
 termcolor
 requests
-kittentts @ https://github.com/KittenML/KittenTTS/releases/download/0.8.1/kittentts-0.8.1-py3-none-any.whl
+edge-tts
+pydub
 soundfile
-moviepy
+moviepy<2
 Pillow>=10.0.0
 faster-whisper
 srt_equalizer
