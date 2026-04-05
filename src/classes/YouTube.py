@@ -4,32 +4,58 @@ import json
 import time
 import os
 import requests
-import assemblyai as aai
 
 from utils import *
-from cache import *
 from .Tts import TTS
 from llm_provider import generate_text
 from config import *
 from status import *
 from uuid import uuid4
-from constants import *
 from typing import List
-from moviepy.editor import *
 from termcolor import colored
-from selenium_firefox import *
-from selenium import webdriver
-from moviepy.video.fx.all import crop
-from moviepy.config import change_settings
-from selenium.webdriver.common.by import By
-from selenium.webdriver.firefox.service import Service
-from selenium.webdriver.firefox.options import Options
-from moviepy.video.tools.subtitles import SubtitlesClip
-from webdriver_manager.firefox import GeckoDriverManager
 from datetime import datetime
 
+# Lazy imports for browser-dependent modules
+_browser_imports_done = False
+
+def _ensure_browser_imports():
+    global _browser_imports_done
+    if _browser_imports_done:
+        return
+    global aai, webdriver, By, Service, Options, GeckoDriverManager
+    global YOUTUBE_TEXTBOX_ID, YOUTUBE_MADE_FOR_KIDS_NAME, YOUTUBE_NOT_MADE_FOR_KIDS_NAME
+    global YOUTUBE_NEXT_BUTTON_ID, YOUTUBE_RADIO_BUTTON_XPATH, YOUTUBE_DONE_BUTTON_ID
+    global get_youtube_cache_path
+    import assemblyai as aai
+    import selenium_firefox  # noqa: F401
+    from selenium import webdriver
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.firefox.service import Service
+    from selenium.webdriver.firefox.options import Options
+    from webdriver_manager.firefox import GeckoDriverManager
+    import constants
+    YOUTUBE_TEXTBOX_ID = constants.YOUTUBE_TEXTBOX_ID
+    YOUTUBE_MADE_FOR_KIDS_NAME = constants.YOUTUBE_MADE_FOR_KIDS_NAME
+    YOUTUBE_NOT_MADE_FOR_KIDS_NAME = constants.YOUTUBE_NOT_MADE_FOR_KIDS_NAME
+    YOUTUBE_NEXT_BUTTON_ID = constants.YOUTUBE_NEXT_BUTTON_ID
+    YOUTUBE_RADIO_BUTTON_XPATH = constants.YOUTUBE_RADIO_BUTTON_XPATH
+    YOUTUBE_DONE_BUTTON_ID = constants.YOUTUBE_DONE_BUTTON_ID
+    from cache import get_youtube_cache_path
+    _browser_imports_done = True
+
+# MoviePy imports (always needed for video generation)
+from moviepy.editor import (
+    ImageClip, AudioFileClip, TextClip, CompositeVideoClip,
+    CompositeAudioClip, concatenate_videoclips, afx,
+)
+from moviepy.video.fx.all import crop
+from moviepy.config import change_settings
+from moviepy.video.tools.subtitles import SubtitlesClip
+
 # Set ImageMagick Path
-change_settings({"IMAGEMAGICK_BINARY": get_imagemagick_path()})
+imgk = get_imagemagick_path()
+if imgk:
+    change_settings({"IMAGEMAGICK_BINARY": imgk})
 
 
 class YouTube:
@@ -54,6 +80,7 @@ class YouTube:
         fp_profile_path: str,
         niche: str,
         language: str,
+        use_browser: bool = True,
     ) -> None:
         """
         Constructor for YouTube Class.
@@ -64,6 +91,7 @@ class YouTube:
             fp_profile_path (str): Path to the firefox profile that is logged into the specificed YouTube Account.
             niche (str): The niche of the provided YouTube Channel.
             language (str): The language of the Automation.
+            use_browser (bool): If False, skip Selenium initialization (for headless video generation).
 
         Returns:
             None
@@ -73,11 +101,18 @@ class YouTube:
         self._fp_profile_path: str = fp_profile_path
         self._niche: str = niche
         self._language: str = language
+        self._use_browser: bool = use_browser
 
         self.images = []
 
+        if not self._use_browser:
+            self.browser = None
+            return
+
+        _ensure_browser_imports()
+
         # Initialize the Firefox profile
-        self.options: Options = Options()
+        self.options = Options()
 
         # Set headless state of browser
         if get_headless():
@@ -92,10 +127,10 @@ class YouTube:
         self.options.add_argument(self._fp_profile_path)
 
         # Set the service
-        self.service: Service = Service(GeckoDriverManager().install())
+        self.service = Service(GeckoDriverManager().install())
 
         # Initialize the browser
-        self.browser: webdriver.Firefox = webdriver.Firefox(
+        self.browser = webdriver.Firefox(
             service=self.service, options=self.options
         )
 
@@ -170,31 +205,32 @@ class YouTube:
         Get straight to the point, don't start with unnecessary things like, "welcome to this video".
 
         Obviously, the script should be related to the subject of the video.
-        
+
         YOU MUST NOT EXCEED THE {sentence_length} SENTENCES LIMIT. MAKE SURE THE {sentence_length} SENTENCES ARE SHORT.
         YOU MUST NOT INCLUDE ANY TYPE OF MARKDOWN OR FORMATTING IN THE SCRIPT, NEVER USE A TITLE.
         YOU MUST WRITE THE SCRIPT IN THE LANGUAGE SPECIFIED IN [LANGUAGE].
         ONLY RETURN THE RAW CONTENT OF THE SCRIPT. DO NOT INCLUDE "VOICEOVER", "NARRATOR" OR SIMILAR INDICATORS OF WHAT SHOULD BE SPOKEN AT THE BEGINNING OF EACH PARAGRAPH OR LINE. YOU MUST NOT MENTION THE PROMPT, OR ANYTHING ABOUT THE SCRIPT ITSELF. ALSO, NEVER TALK ABOUT THE AMOUNT OF PARAGRAPHS OR LINES. JUST WRITE THE SCRIPT
-        
+
         Subject: {self.subject}
         Language: {self.language}
         """
-        completion = self.generate_response(prompt)
+        max_retries = 3
+        for attempt in range(max_retries):
+            completion = self.generate_response(prompt)
+            completion = re.sub(r"\*", "", completion)
 
-        # Apply regex to remove *
-        completion = re.sub(r"\*", "", completion)
+            if not completion:
+                error("The generated script is empty.")
+                return
 
-        if not completion:
-            error("The generated script is empty.")
-            return
+            if len(completion) <= 5000:
+                self.script = completion
+                return completion
 
-        if len(completion) > 5000:
             if get_verbose():
-                warning("Generated Script is too long. Retrying...")
-            return self.generate_script()
+                warning(f"Generated Script is too long (attempt {attempt + 1}/{max_retries}). Retrying...")
 
         self.script = completion
-
         return completion
 
     def generate_metadata(self) -> dict:
@@ -204,14 +240,16 @@ class YouTube:
         Returns:
             metadata (dict): The generated metadata.
         """
-        title = self.generate_response(
-            f"Please generate a YouTube Video Title for the following subject, including hashtags: {self.subject}. Only return the title, nothing else. Limit the title under 100 characters."
-        )
-
-        if len(title) > 100:
+        max_retries = 3
+        title = ""
+        for attempt in range(max_retries):
+            title = self.generate_response(
+                f"Please generate a YouTube Video Title for the following subject, including hashtags: {self.subject}. Only return the title, nothing else. Limit the title under 100 characters."
+            )
+            if len(title) <= 100:
+                break
             if get_verbose():
-                warning("Generated Title is too long. Retrying...")
-            return self.generate_metadata()
+                warning(f"Generated Title is too long (attempt {attempt + 1}/{max_retries}). Retrying...")
 
         description = self.generate_response(
             f"Please generate a YouTube Video Description for the following script: {self.script}. Only return the description, nothing else."
@@ -282,8 +320,8 @@ class YouTube:
                 image_prompts = r.findall(completion)
                 if len(image_prompts) == 0:
                     if get_verbose():
-                        warning("Failed to generate Image Prompts. Retrying...")
-                    return self.generate_prompts()
+                        warning("Failed to generate Image Prompts.")
+                    image_prompts = [self.subject]
 
         if len(image_prompts) > n_prompts:
             image_prompts = image_prompts[: int(n_prompts)]
@@ -423,6 +461,7 @@ class YouTube:
         Returns:
             None
         """
+        _ensure_browser_imports()
         videos = self.get_videos()
         videos.append(video)
 
@@ -685,6 +724,12 @@ class YouTube:
 
         return path
 
+    def _require_browser(self):
+        if not self._use_browser or self.browser is None:
+            raise RuntimeError(
+                "Browser is not available. This method requires use_browser=True."
+            )
+
     def get_channel_id(self) -> str:
         """
         Gets the Channel ID of the YouTube Account.
@@ -692,6 +737,7 @@ class YouTube:
         Returns:
             channel_id (str): The Channel ID.
         """
+        self._require_browser()
         driver = self.browser
         driver.get("https://studio.youtube.com")
         time.sleep(2)
@@ -707,6 +753,8 @@ class YouTube:
         Returns:
             success (bool): Whether the upload was successful or not.
         """
+        self._require_browser()
+        _ensure_browser_imports()
         try:
             self.get_channel_id()
 
@@ -848,7 +896,8 @@ class YouTube:
             driver.quit()
 
             return True
-        except:
+        except Exception as e:
+            error(f"Failed to upload video: {e}")
             self.browser.quit()
             return False
 
@@ -859,6 +908,7 @@ class YouTube:
         Returns:
             videos (List[dict]): The uploaded videos.
         """
+        _ensure_browser_imports()
         if not os.path.exists(get_youtube_cache_path()):
             # Create the cache file
             with open(get_youtube_cache_path(), "w") as file:
