@@ -1,5 +1,6 @@
 import os
 import tempfile
+import urllib.request
 import fal_client
 import gradio as gr
 from concurrent.futures import ThreadPoolExecutor
@@ -8,24 +9,23 @@ from concurrent.futures import ThreadPoolExecutor
 # Helpers
 # ---------------------------------------------------------------------------
 
-def upload_file(filepath):
-    """Upload a local file to fal CDN and return the URL."""
+def encode_file(filepath):
+    """Encode a local file as a data URI for fal API (avoids CDN upload auth)."""
     if filepath is None:
         return None
-    return fal_client.upload_file(filepath)
+    return fal_client.encode_file(filepath)
 
 
-def upload_files(filepaths):
-    """Upload multiple files in parallel, return list of URLs."""
+def encode_files(filepaths):
+    """Encode multiple files in parallel, return list of data URIs."""
     if not filepaths:
         return []
     with ThreadPoolExecutor(max_workers=min(len(filepaths), 7)) as pool:
-        return list(pool.map(upload_file, filepaths))
+        return list(pool.map(encode_file, filepaths))
 
 
 def download_video(url):
     """Download video from URL to a temp file and return the path."""
-    import urllib.request
     tmp = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
     urllib.request.urlretrieve(url, tmp.name)
     return tmp.name
@@ -33,19 +33,39 @@ def download_video(url):
 
 def download_image(url):
     """Download image from URL to a temp file and return the path."""
-    import urllib.request
-    ext = ".jpg"
-    if "png" in url:
-        ext = ".png"
-    elif "webp" in url:
-        ext = ".webp"
+    ext = ".png" if "png" in url else ".webp" if "webp" in url else ".jpg"
     tmp = tempfile.NamedTemporaryFile(suffix=ext, delete=False)
     urllib.request.urlretrieve(url, tmp.name)
     return tmp.name
 
 
 # ---------------------------------------------------------------------------
-# Tab 1: Image Edit
+# Tab 1: Text to Image
+# ---------------------------------------------------------------------------
+
+def text_to_image(prompt, num_images, aspect_ratio, resolution, output_format):
+    if not prompt:
+        raise gr.Error("Prompt is required")
+
+    result = fal_client.subscribe("xai/grok-imagine-image", arguments={
+        "prompt": prompt,
+        "num_images": int(num_images),
+        "aspect_ratio": aspect_ratio,
+        "resolution": resolution,
+        "output_format": output_format,
+    })
+
+    output_images = []
+    for img in result.get("images", []):
+        path = download_image(img["url"])
+        output_images.append(path)
+
+    revised = result.get("revised_prompt", "")
+    return output_images, revised
+
+
+# ---------------------------------------------------------------------------
+# Tab 2: Image Edit
 # ---------------------------------------------------------------------------
 
 def image_edit(prompt, images, num_images, resolution, output_format):
@@ -54,7 +74,7 @@ def image_edit(prompt, images, num_images, resolution, output_format):
     if not images or len(images) == 0:
         raise gr.Error("At least one image is required")
 
-    image_urls = upload_files(images)
+    image_urls = encode_files(images)
 
     result = fal_client.subscribe("xai/grok-imagine-image/edit", arguments={
         "prompt": prompt,
@@ -74,7 +94,7 @@ def image_edit(prompt, images, num_images, resolution, output_format):
 
 
 # ---------------------------------------------------------------------------
-# Tab 2: Text to Video
+# Tab 3: Text to Video
 # ---------------------------------------------------------------------------
 
 def text_to_video(prompt, duration, aspect_ratio, resolution):
@@ -88,12 +108,11 @@ def text_to_video(prompt, duration, aspect_ratio, resolution):
         "resolution": resolution,
     })
 
-    video_url = result["video"]["url"]
-    return download_video(video_url)
+    return download_video(result["video"]["url"])
 
 
 # ---------------------------------------------------------------------------
-# Tab 3: Reference to Video
+# Tab 4: Reference to Video
 # ---------------------------------------------------------------------------
 
 def reference_to_video(prompt, ref_images, duration, aspect_ratio, resolution):
@@ -102,7 +121,7 @@ def reference_to_video(prompt, ref_images, duration, aspect_ratio, resolution):
     if not ref_images or len(ref_images) == 0:
         raise gr.Error("At least one reference image is required")
 
-    ref_urls = upload_files(ref_images)
+    ref_urls = encode_files(ref_images)
 
     result = fal_client.subscribe("xai/grok-imagine-video/reference-to-video", arguments={
         "prompt": prompt,
@@ -116,7 +135,7 @@ def reference_to_video(prompt, ref_images, duration, aspect_ratio, resolution):
 
 
 # ---------------------------------------------------------------------------
-# Tab 4: Image to Video
+# Tab 5: Image to Video
 # ---------------------------------------------------------------------------
 
 def image_to_video(prompt, image, duration, aspect_ratio, resolution):
@@ -125,7 +144,7 @@ def image_to_video(prompt, image, duration, aspect_ratio, resolution):
     if image is None:
         raise gr.Error("Image is required")
 
-    image_url = upload_file(image)
+    image_url = encode_file(image)
 
     result = fal_client.subscribe("xai/grok-imagine-video/image-to-video", arguments={
         "prompt": prompt,
@@ -139,7 +158,7 @@ def image_to_video(prompt, image, duration, aspect_ratio, resolution):
 
 
 # ---------------------------------------------------------------------------
-# Tab 5: Extend Video
+# Tab 6: Extend Video
 # ---------------------------------------------------------------------------
 
 def extend_video(prompt, video, duration):
@@ -148,7 +167,7 @@ def extend_video(prompt, video, duration):
     if video is None:
         raise gr.Error("Video is required")
 
-    video_url = upload_file(video)
+    video_url = encode_file(video)
 
     result = fal_client.subscribe("xai/grok-imagine-video/extend-video", arguments={
         "prompt": prompt,
@@ -160,7 +179,7 @@ def extend_video(prompt, video, duration):
 
 
 # ---------------------------------------------------------------------------
-# Tab 6: Edit Video
+# Tab 7: Edit Video
 # ---------------------------------------------------------------------------
 
 def edit_video(prompt, video, resolution):
@@ -169,7 +188,7 @@ def edit_video(prompt, video, resolution):
     if video is None:
         raise gr.Error("Video is required")
 
-    video_url = upload_file(video)
+    video_url = encode_file(video)
 
     result = fal_client.subscribe("xai/grok-imagine-video/edit-video", arguments={
         "prompt": prompt,
@@ -185,12 +204,31 @@ def edit_video(prompt, video, resolution):
 # ---------------------------------------------------------------------------
 
 ASPECT_RATIOS = ["16:9", "4:3", "3:2", "1:1", "2:3", "3:4", "9:16"]
+IMAGE_ASPECT_RATIOS = ["1:1", "2:1", "20:9", "19.5:9", "16:9", "4:3", "3:2", "2:3", "3:4", "9:16", "9:19.5", "9:20", "1:2"]
 
-with gr.Blocks(title="Grok Imagine Studio", theme=gr.themes.Soft()) as demo:
+with gr.Blocks(title="Grok Imagine Studio") as demo:
     gr.Markdown("# Grok Imagine Studio\nImage & Video generation powered by xAI Grok Imagine via fal.ai")
 
     with gr.Tabs():
-        # ---- Tab 1: Image Edit ----
+        # ---- Tab 1: Text to Image ----
+        with gr.Tab("Text to Image"):
+            with gr.Row():
+                with gr.Column():
+                    t2i_prompt = gr.Textbox(label="Prompt", lines=3, max_lines=10, placeholder="Describe the image you want to create...")
+                    with gr.Row():
+                        t2i_num = gr.Slider(minimum=1, maximum=4, step=1, value=1, label="Number of images")
+                        t2i_ar = gr.Dropdown(choices=IMAGE_ASPECT_RATIOS, value="1:1", label="Aspect Ratio")
+                    with gr.Row():
+                        t2i_res = gr.Dropdown(choices=["1k", "2k"], value="1k", label="Resolution")
+                        t2i_fmt = gr.Dropdown(choices=["jpeg", "png", "webp"], value="png", label="Format")
+                    t2i_btn = gr.Button("Generate", variant="primary")
+                with gr.Column():
+                    t2i_gallery = gr.Gallery(label="Results", columns=2)
+                    t2i_revised = gr.Textbox(label="Revised Prompt", interactive=False)
+
+            t2i_btn.click(text_to_image, inputs=[t2i_prompt, t2i_num, t2i_ar, t2i_res, t2i_fmt], outputs=[t2i_gallery, t2i_revised])
+
+        # ---- Tab 2: Image Edit ----
         with gr.Tab("Image Edit"):
             with gr.Row():
                 with gr.Column():
@@ -207,7 +245,7 @@ with gr.Blocks(title="Grok Imagine Studio", theme=gr.themes.Soft()) as demo:
 
             ie_btn.click(image_edit, inputs=[ie_prompt, ie_images, ie_num, ie_res, ie_fmt], outputs=[ie_gallery, ie_revised])
 
-        # ---- Tab 2: Text to Video ----
+        # ---- Tab 3: Text to Video ----
         with gr.Tab("Text to Video"):
             with gr.Row():
                 with gr.Column():
@@ -222,7 +260,7 @@ with gr.Blocks(title="Grok Imagine Studio", theme=gr.themes.Soft()) as demo:
 
             t2v_btn.click(text_to_video, inputs=[t2v_prompt, t2v_dur, t2v_ar, t2v_res], outputs=[t2v_video])
 
-        # ---- Tab 3: Reference to Video ----
+        # ---- Tab 4: Reference to Video ----
         with gr.Tab("Reference to Video"):
             with gr.Row():
                 with gr.Column():
@@ -238,7 +276,7 @@ with gr.Blocks(title="Grok Imagine Studio", theme=gr.themes.Soft()) as demo:
 
             r2v_btn.click(reference_to_video, inputs=[r2v_prompt, r2v_images, r2v_dur, r2v_ar, r2v_res], outputs=[r2v_video])
 
-        # ---- Tab 4: Image to Video ----
+        # ---- Tab 5: Image to Video ----
         with gr.Tab("Image to Video"):
             with gr.Row():
                 with gr.Column():
@@ -254,7 +292,7 @@ with gr.Blocks(title="Grok Imagine Studio", theme=gr.themes.Soft()) as demo:
 
             i2v_btn.click(image_to_video, inputs=[i2v_prompt, i2v_image, i2v_dur, i2v_ar, i2v_res], outputs=[i2v_video])
 
-        # ---- Tab 5: Extend Video ----
+        # ---- Tab 6: Extend Video ----
         with gr.Tab("Extend Video"):
             with gr.Row():
                 with gr.Column():
@@ -267,7 +305,7 @@ with gr.Blocks(title="Grok Imagine Studio", theme=gr.themes.Soft()) as demo:
 
             ev_btn.click(extend_video, inputs=[ev_prompt, ev_video, ev_dur], outputs=[ev_output])
 
-        # ---- Tab 6: Edit Video ----
+        # ---- Tab 7: Edit Video ----
         with gr.Tab("Edit Video"):
             with gr.Row():
                 with gr.Column():
@@ -280,4 +318,4 @@ with gr.Blocks(title="Grok Imagine Studio", theme=gr.themes.Soft()) as demo:
 
             edv_btn.click(edit_video, inputs=[edv_prompt, edv_video, edv_res], outputs=[edv_output])
 
-demo.queue(default_concurrency_limit=4).launch()
+demo.queue(default_concurrency_limit=4).launch(theme=gr.themes.Soft(), ssr_mode=False)
