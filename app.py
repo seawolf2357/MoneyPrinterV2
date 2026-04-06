@@ -9,11 +9,26 @@ from concurrent.futures import ThreadPoolExecutor
 # Helpers
 # ---------------------------------------------------------------------------
 
-def encode_file(filepath):
-    """Encode a local file as a data URI for fal API (avoids CDN upload auth)."""
+def _resolve_path(filepath):
+    """Resolve a Gradio file path - handles both str and NamedString/file objects."""
     if filepath is None:
         return None
-    return fal_client.encode_file(filepath)
+    if isinstance(filepath, str):
+        return filepath
+    # Gradio File component may return objects with .name or path attribute
+    if hasattr(filepath, 'name'):
+        return filepath.name
+    if hasattr(filepath, 'path'):
+        return filepath.path
+    return str(filepath)
+
+
+def encode_file(filepath):
+    """Encode a local file as a data URI for fal API (avoids CDN upload auth)."""
+    resolved = _resolve_path(filepath)
+    if resolved is None:
+        return None
+    return fal_client.encode_file(resolved)
 
 
 def encode_files(filepaths):
