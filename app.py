@@ -2,8 +2,24 @@ import os
 import tempfile
 import urllib.request
 import fal_client
+import fal_client.client
 import gradio as gr
 from concurrent.futures import ThreadPoolExecutor
+
+
+def call_fal(model_id, arguments):
+    """Call fal API with content-policy error handling."""
+    try:
+        return fal_client.subscribe(model_id, arguments=arguments)
+    except fal_client.client.FalClientHTTPError as e:
+        msg = str(e)
+        if "content_policy_violation" in msg:
+            raise gr.Error(
+                "xAI content policy violation: The prompt was rejected by xAI's server-side content filter. "
+                "This is enforced by xAI and cannot be disabled. Please modify your prompt."
+            )
+        raise gr.Error(f"API error: {msg}")
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -62,7 +78,7 @@ def text_to_image(prompt, num_images, aspect_ratio, resolution, output_format):
     if not prompt:
         raise gr.Error("Prompt is required")
 
-    result = fal_client.subscribe("xai/grok-imagine-image", arguments={
+    result = call_fal("xai/grok-imagine-image", {
         "prompt": prompt,
         "num_images": int(num_images),
         "aspect_ratio": aspect_ratio,
@@ -91,7 +107,7 @@ def image_edit(prompt, images, num_images, resolution, output_format):
 
     image_urls = encode_files(images)
 
-    result = fal_client.subscribe("xai/grok-imagine-image/edit", arguments={
+    result = call_fal("xai/grok-imagine-image/edit", {
         "prompt": prompt,
         "image_urls": image_urls,
         "num_images": int(num_images),
@@ -116,7 +132,7 @@ def text_to_video(prompt, duration, aspect_ratio, resolution):
     if not prompt:
         raise gr.Error("Prompt is required")
 
-    result = fal_client.subscribe("xai/grok-imagine-video/text-to-video", arguments={
+    result = call_fal("xai/grok-imagine-video/text-to-video", {
         "prompt": prompt,
         "duration": int(duration),
         "aspect_ratio": aspect_ratio,
@@ -138,7 +154,7 @@ def reference_to_video(prompt, ref_images, duration, aspect_ratio, resolution):
 
     ref_urls = encode_files(ref_images)
 
-    result = fal_client.subscribe("xai/grok-imagine-video/reference-to-video", arguments={
+    result = call_fal("xai/grok-imagine-video/reference-to-video", {
         "prompt": prompt,
         "reference_image_urls": ref_urls,
         "duration": int(duration),
@@ -161,7 +177,7 @@ def image_to_video(prompt, image, duration, aspect_ratio, resolution):
 
     image_url = encode_file(image)
 
-    result = fal_client.subscribe("xai/grok-imagine-video/image-to-video", arguments={
+    result = call_fal("xai/grok-imagine-video/image-to-video", {
         "prompt": prompt,
         "image_url": image_url,
         "duration": int(duration),
@@ -184,7 +200,7 @@ def extend_video(prompt, video, duration):
 
     video_url = encode_file(video)
 
-    result = fal_client.subscribe("xai/grok-imagine-video/extend-video", arguments={
+    result = call_fal("xai/grok-imagine-video/extend-video", {
         "prompt": prompt,
         "video_url": video_url,
         "duration": int(duration),
@@ -205,7 +221,7 @@ def edit_video(prompt, video, resolution):
 
     video_url = encode_file(video)
 
-    result = fal_client.subscribe("xai/grok-imagine-video/edit-video", arguments={
+    result = call_fal("xai/grok-imagine-video/edit-video", {
         "prompt": prompt,
         "video_url": video_url,
         "resolution": resolution,
