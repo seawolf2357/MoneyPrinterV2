@@ -15,10 +15,10 @@ def call_fal(model_id, arguments):
         msg = str(e)
         if "content_policy_violation" in msg:
             raise gr.Error(
-                "xAI content policy violation: The prompt was rejected by xAI's server-side content filter. "
-                "This is enforced by xAI and cannot be disabled. Please modify your prompt."
+                "xAI 콘텐츠 정책 위반: 프롬프트가 xAI 서버의 콘텐츠 필터에 의해 거부되었습니다. "
+                "이 필터는 xAI에서 강제 적용하며 비활성화할 수 없습니다. 프롬프트를 수정해 주세요."
             )
-        raise gr.Error(f"API error: {msg}")
+        raise gr.Error(f"API 오류: {msg}")
 
 
 # ---------------------------------------------------------------------------
@@ -31,7 +31,6 @@ def _resolve_path(filepath):
         return None
     if isinstance(filepath, str):
         return filepath
-    # Gradio File component may return objects with .name or path attribute
     if hasattr(filepath, 'name'):
         return filepath.name
     if hasattr(filepath, 'path'):
@@ -76,7 +75,7 @@ def download_image(url):
 
 def text_to_image(prompt, num_images, aspect_ratio, resolution, output_format):
     if not prompt:
-        raise gr.Error("Prompt is required")
+        raise gr.Error("프롬프트를 입력해 주세요")
 
     result = call_fal("xai/grok-imagine-image", {
         "prompt": prompt,
@@ -101,9 +100,9 @@ def text_to_image(prompt, num_images, aspect_ratio, resolution, output_format):
 
 def image_edit(prompt, images, num_images, resolution, output_format):
     if not prompt:
-        raise gr.Error("Prompt is required")
+        raise gr.Error("프롬프트를 입력해 주세요")
     if not images or len(images) == 0:
-        raise gr.Error("At least one image is required")
+        raise gr.Error("최소 1개의 이미지를 업로드해 주세요")
 
     image_urls = encode_files(images)
 
@@ -130,7 +129,7 @@ def image_edit(prompt, images, num_images, resolution, output_format):
 
 def text_to_video(prompt, duration, aspect_ratio, resolution):
     if not prompt:
-        raise gr.Error("Prompt is required")
+        raise gr.Error("프롬프트를 입력해 주세요")
 
     result = call_fal("xai/grok-imagine-video/text-to-video", {
         "prompt": prompt,
@@ -148,9 +147,9 @@ def text_to_video(prompt, duration, aspect_ratio, resolution):
 
 def reference_to_video(prompt, ref_images, duration, aspect_ratio, resolution):
     if not prompt:
-        raise gr.Error("Prompt is required")
+        raise gr.Error("프롬프트를 입력해 주세요")
     if not ref_images or len(ref_images) == 0:
-        raise gr.Error("At least one reference image is required")
+        raise gr.Error("최소 1개의 참조 이미지를 업로드해 주세요")
 
     ref_urls = encode_files(ref_images)
 
@@ -171,9 +170,9 @@ def reference_to_video(prompt, ref_images, duration, aspect_ratio, resolution):
 
 def image_to_video(prompt, image, duration, aspect_ratio, resolution):
     if not prompt:
-        raise gr.Error("Prompt is required")
+        raise gr.Error("프롬프트를 입력해 주세요")
     if image is None:
-        raise gr.Error("Image is required")
+        raise gr.Error("이미지를 업로드해 주세요")
 
     image_url = encode_file(image)
 
@@ -189,35 +188,14 @@ def image_to_video(prompt, image, duration, aspect_ratio, resolution):
 
 
 # ---------------------------------------------------------------------------
-# Tab 6: Extend Video
-# ---------------------------------------------------------------------------
-
-def extend_video(prompt, video, duration):
-    if not prompt:
-        raise gr.Error("Prompt is required")
-    if video is None:
-        raise gr.Error("Video is required")
-
-    video_url = encode_file(video)
-
-    result = call_fal("xai/grok-imagine-video/extend-video", {
-        "prompt": prompt,
-        "video_url": video_url,
-        "duration": int(duration),
-    })
-
-    return download_video(result["video"]["url"])
-
-
-# ---------------------------------------------------------------------------
-# Tab 7: Edit Video
+# Tab 6: Edit Video
 # ---------------------------------------------------------------------------
 
 def edit_video(prompt, video, resolution):
     if not prompt:
-        raise gr.Error("Prompt is required")
+        raise gr.Error("프롬프트를 입력해 주세요")
     if video is None:
-        raise gr.Error("Video is required")
+        raise gr.Error("비디오를 업로드해 주세요")
 
     video_url = encode_file(video)
 
@@ -238,114 +216,132 @@ ASPECT_RATIOS = ["16:9", "4:3", "3:2", "1:1", "2:3", "3:4", "9:16"]
 IMAGE_ASPECT_RATIOS = ["1:1", "2:1", "20:9", "19.5:9", "16:9", "4:3", "3:2", "2:3", "3:4", "9:16", "9:19.5", "9:20", "1:2"]
 
 with gr.Blocks(title="Grok Imagine Studio") as demo:
-    gr.Markdown("# Grok Imagine Studio\nImage & Video generation powered by xAI Grok Imagine via fal.ai")
+    gr.Markdown("# Grok Imagine Studio\nxAI Grok Imagine API 기반 이미지 & 비디오 생성 스튜디오 (fal.ai)")
 
     with gr.Tabs():
         # ---- Tab 1: Text to Image ----
-        with gr.Tab("Text to Image"):
+        with gr.Tab("텍스트 to 이미지"):
+            gr.Markdown(
+                "### 텍스트로 이미지 생성\n"
+                "텍스트 프롬프트를 입력하면 AI가 이미지를 생성합니다. "
+                "최대 4장까지 동시에 생성할 수 있으며, 다양한 비율과 해상도를 지원합니다."
+            )
             with gr.Row():
                 with gr.Column():
-                    t2i_prompt = gr.Textbox(label="Prompt", lines=3, max_lines=10, placeholder="Describe the image you want to create...")
+                    t2i_prompt = gr.Textbox(label="프롬프트", lines=3, max_lines=10, placeholder="생성하고 싶은 이미지를 설명해 주세요...")
                     with gr.Row():
-                        t2i_num = gr.Slider(minimum=1, maximum=4, step=1, value=1, label="Number of images")
-                        t2i_ar = gr.Dropdown(choices=IMAGE_ASPECT_RATIOS, value="1:1", label="Aspect Ratio")
+                        t2i_num = gr.Slider(minimum=1, maximum=4, step=1, value=1, label="생성 이미지 수")
+                        t2i_ar = gr.Dropdown(choices=IMAGE_ASPECT_RATIOS, value="1:1", label="비율")
                     with gr.Row():
-                        t2i_res = gr.Dropdown(choices=["1k", "2k"], value="1k", label="Resolution")
-                        t2i_fmt = gr.Dropdown(choices=["jpeg", "png", "webp"], value="png", label="Format")
-                    t2i_btn = gr.Button("Generate", variant="primary")
+                        t2i_res = gr.Dropdown(choices=["1k", "2k"], value="1k", label="해상도")
+                        t2i_fmt = gr.Dropdown(choices=["jpeg", "png", "webp"], value="png", label="출력 형식")
+                    t2i_btn = gr.Button("생성하기", variant="primary")
                 with gr.Column():
-                    t2i_gallery = gr.Gallery(label="Results", columns=2)
-                    t2i_revised = gr.Textbox(label="Revised Prompt", interactive=False)
+                    t2i_gallery = gr.Gallery(label="생성 결과", columns=2)
+                    t2i_revised = gr.Textbox(label="수정된 프롬프트", interactive=False)
 
             t2i_btn.click(text_to_image, inputs=[t2i_prompt, t2i_num, t2i_ar, t2i_res, t2i_fmt], outputs=[t2i_gallery, t2i_revised])
 
         # ---- Tab 2: Image Edit ----
-        with gr.Tab("Image Edit"):
+        with gr.Tab("이미지 편집"):
+            gr.Markdown(
+                "### AI 이미지 편집\n"
+                "기존 이미지를 업로드하고 텍스트로 편집 내용을 설명하면 AI가 이미지를 수정합니다. "
+                "최대 3장의 이미지를 동시에 입력할 수 있습니다."
+            )
             with gr.Row():
                 with gr.Column():
-                    ie_prompt = gr.Textbox(label="Prompt", lines=3, max_lines=10, placeholder="Describe the edit you want...")
-                    ie_images = gr.File(label="Input Images (max 3)", file_count="multiple", file_types=["image"])
+                    ie_prompt = gr.Textbox(label="프롬프트", lines=3, max_lines=10, placeholder="원하는 편집 내용을 설명해 주세요...")
+                    ie_images = gr.File(label="입력 이미지 (최대 3장)", file_count="multiple", file_types=["image"])
                     with gr.Row():
-                        ie_num = gr.Slider(minimum=1, maximum=4, step=1, value=1, label="Number of outputs")
-                        ie_res = gr.Dropdown(choices=["1k", "2k"], value="1k", label="Resolution")
-                        ie_fmt = gr.Dropdown(choices=["jpeg", "png", "webp"], value="jpeg", label="Format")
-                    ie_btn = gr.Button("Generate", variant="primary")
+                        ie_num = gr.Slider(minimum=1, maximum=4, step=1, value=1, label="출력 이미지 수")
+                        ie_res = gr.Dropdown(choices=["1k", "2k"], value="1k", label="해상도")
+                        ie_fmt = gr.Dropdown(choices=["jpeg", "png", "webp"], value="jpeg", label="출력 형식")
+                    ie_btn = gr.Button("편집하기", variant="primary")
                 with gr.Column():
-                    ie_gallery = gr.Gallery(label="Results", columns=2)
-                    ie_revised = gr.Textbox(label="Revised Prompt", interactive=False)
+                    ie_gallery = gr.Gallery(label="편집 결과", columns=2)
+                    ie_revised = gr.Textbox(label="수정된 프롬프트", interactive=False)
 
             ie_btn.click(image_edit, inputs=[ie_prompt, ie_images, ie_num, ie_res, ie_fmt], outputs=[ie_gallery, ie_revised])
 
         # ---- Tab 3: Text to Video ----
-        with gr.Tab("Text to Video"):
+        with gr.Tab("텍스트 to 비디오"):
+            gr.Markdown(
+                "### 텍스트로 비디오 생성\n"
+                "텍스트 프롬프트만으로 최대 15초 길이의 비디오를 생성합니다. "
+                "480p 또는 720p 해상도를 선택할 수 있습니다."
+            )
             with gr.Row():
                 with gr.Column():
-                    t2v_prompt = gr.Textbox(label="Prompt", lines=3, max_lines=10, placeholder="Describe the video...")
+                    t2v_prompt = gr.Textbox(label="프롬프트", lines=3, max_lines=10, placeholder="생성하고 싶은 비디오를 설명해 주세요...")
                     with gr.Row():
-                        t2v_dur = gr.Slider(minimum=1, maximum=15, step=1, value=6, label="Duration (sec)")
-                        t2v_ar = gr.Dropdown(choices=ASPECT_RATIOS, value="16:9", label="Aspect Ratio")
-                        t2v_res = gr.Dropdown(choices=["480p", "720p"], value="720p", label="Resolution")
-                    t2v_btn = gr.Button("Generate", variant="primary")
+                        t2v_dur = gr.Slider(minimum=1, maximum=15, step=1, value=6, label="길이 (초)")
+                        t2v_ar = gr.Dropdown(choices=ASPECT_RATIOS, value="16:9", label="비율")
+                        t2v_res = gr.Dropdown(choices=["480p", "720p"], value="720p", label="해상도")
+                    t2v_btn = gr.Button("생성하기", variant="primary")
                 with gr.Column():
-                    t2v_video = gr.Video(label="Result")
+                    t2v_video = gr.Video(label="생성 결과")
 
             t2v_btn.click(text_to_video, inputs=[t2v_prompt, t2v_dur, t2v_ar, t2v_res], outputs=[t2v_video])
 
         # ---- Tab 4: Reference to Video ----
-        with gr.Tab("Reference to Video"):
+        with gr.Tab("참조 이미지 to 비디오"):
+            gr.Markdown(
+                "### 참조 이미지 기반 비디오 생성\n"
+                "참조 이미지를 업로드하고 프롬프트에서 @Image1, @Image2 등으로 참조하여 비디오를 생성합니다. "
+                "최대 7장의 참조 이미지를 사용할 수 있습니다."
+            )
             with gr.Row():
                 with gr.Column():
-                    r2v_prompt = gr.Textbox(label="Prompt (use @Image1, @Image2... to reference images)", lines=3, max_lines=10)
-                    r2v_images = gr.File(label="Reference Images (max 7)", file_count="multiple", file_types=["image"])
+                    r2v_prompt = gr.Textbox(label="프롬프트 (@Image1, @Image2... 로 이미지 참조)", lines=3, max_lines=10,
+                                           placeholder="예: @Image1의 캐릭터가 @Image2 배경에서 걷고 있는 장면")
+                    r2v_images = gr.File(label="참조 이미지 (최대 7장)", file_count="multiple", file_types=["image"])
                     with gr.Row():
-                        r2v_dur = gr.Slider(minimum=1, maximum=10, step=1, value=8, label="Duration (sec)")
-                        r2v_ar = gr.Dropdown(choices=ASPECT_RATIOS, value="16:9", label="Aspect Ratio")
-                        r2v_res = gr.Dropdown(choices=["480p", "720p"], value="480p", label="Resolution")
-                    r2v_btn = gr.Button("Generate", variant="primary")
+                        r2v_dur = gr.Slider(minimum=1, maximum=10, step=1, value=8, label="길이 (초)")
+                        r2v_ar = gr.Dropdown(choices=ASPECT_RATIOS, value="16:9", label="비율")
+                        r2v_res = gr.Dropdown(choices=["480p", "720p"], value="480p", label="해상도")
+                    r2v_btn = gr.Button("생성하기", variant="primary")
                 with gr.Column():
-                    r2v_video = gr.Video(label="Result")
+                    r2v_video = gr.Video(label="생성 결과")
 
             r2v_btn.click(reference_to_video, inputs=[r2v_prompt, r2v_images, r2v_dur, r2v_ar, r2v_res], outputs=[r2v_video])
 
         # ---- Tab 5: Image to Video ----
-        with gr.Tab("Image to Video"):
+        with gr.Tab("이미지 to 비디오"):
+            gr.Markdown(
+                "### 이미지를 비디오로 변환\n"
+                "정지 이미지를 업로드하고 원하는 움직임을 설명하면 AI가 이미지를 애니메이션 비디오로 변환합니다. "
+                "비율을 'auto'로 설정하면 원본 이미지 비율을 유지합니다."
+            )
             with gr.Row():
                 with gr.Column():
-                    i2v_prompt = gr.Textbox(label="Prompt", lines=3, max_lines=10, placeholder="Describe the motion...")
-                    i2v_image = gr.Image(label="Input Image", type="filepath")
+                    i2v_prompt = gr.Textbox(label="프롬프트", lines=3, max_lines=10, placeholder="원하는 움직임이나 변화를 설명해 주세요...")
+                    i2v_image = gr.Image(label="입력 이미지", type="filepath")
                     with gr.Row():
-                        i2v_dur = gr.Slider(minimum=1, maximum=15, step=1, value=6, label="Duration (sec)")
-                        i2v_ar = gr.Dropdown(choices=["auto"] + ASPECT_RATIOS, value="auto", label="Aspect Ratio")
-                        i2v_res = gr.Dropdown(choices=["480p", "720p"], value="720p", label="Resolution")
-                    i2v_btn = gr.Button("Generate", variant="primary")
+                        i2v_dur = gr.Slider(minimum=1, maximum=15, step=1, value=6, label="길이 (초)")
+                        i2v_ar = gr.Dropdown(choices=["auto"] + ASPECT_RATIOS, value="auto", label="비율")
+                        i2v_res = gr.Dropdown(choices=["480p", "720p"], value="720p", label="해상도")
+                    i2v_btn = gr.Button("생성하기", variant="primary")
                 with gr.Column():
-                    i2v_video = gr.Video(label="Result")
+                    i2v_video = gr.Video(label="생성 결과")
 
             i2v_btn.click(image_to_video, inputs=[i2v_prompt, i2v_image, i2v_dur, i2v_ar, i2v_res], outputs=[i2v_video])
 
-        # ---- Tab 6: Extend Video ----
-        with gr.Tab("Extend Video"):
+        # ---- Tab 6: Edit Video ----
+        with gr.Tab("비디오 편집"):
+            gr.Markdown(
+                "### AI 비디오 편집\n"
+                "기존 비디오를 업로드하고 텍스트로 편집 내용을 설명하면 AI가 비디오를 수정합니다. "
+                "입력 비디오는 최대 854x480 크기, 8초 길이로 자동 조정됩니다."
+            )
             with gr.Row():
                 with gr.Column():
-                    ev_prompt = gr.Textbox(label="Prompt", lines=3, max_lines=10, placeholder="What should happen next...")
-                    ev_video = gr.Video(label="Input Video (MP4, 2-15 sec)")
-                    ev_dur = gr.Slider(minimum=2, maximum=10, step=1, value=6, label="Extension Duration (sec)")
-                    ev_btn = gr.Button("Generate", variant="primary")
+                    edv_prompt = gr.Textbox(label="프롬프트", lines=3, max_lines=10, placeholder="원하는 편집 내용을 설명해 주세요...")
+                    edv_video = gr.Video(label="입력 비디오")
+                    edv_res = gr.Dropdown(choices=["auto", "480p", "720p"], value="auto", label="해상도")
+                    edv_btn = gr.Button("편집하기", variant="primary")
                 with gr.Column():
-                    ev_output = gr.Video(label="Extended Video")
-
-            ev_btn.click(extend_video, inputs=[ev_prompt, ev_video, ev_dur], outputs=[ev_output])
-
-        # ---- Tab 7: Edit Video ----
-        with gr.Tab("Edit Video"):
-            with gr.Row():
-                with gr.Column():
-                    edv_prompt = gr.Textbox(label="Prompt", lines=3, max_lines=10, placeholder="Describe the edit...")
-                    edv_video = gr.Video(label="Input Video")
-                    edv_res = gr.Dropdown(choices=["auto", "480p", "720p"], value="auto", label="Resolution")
-                    edv_btn = gr.Button("Generate", variant="primary")
-                with gr.Column():
-                    edv_output = gr.Video(label="Edited Video")
+                    edv_output = gr.Video(label="편집 결과")
 
             edv_btn.click(edit_video, inputs=[edv_prompt, edv_video, edv_res], outputs=[edv_output])
 
